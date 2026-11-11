@@ -1,0 +1,8 @@
+{
+  "sources": ["Example/Sources/"],
+  "ui_tests": "Example/UITests/",
+  "target": "ExampleUITests",
+  "scope": ["Example/"],
+  "ignore": [],
+  "read_by": {}
+}

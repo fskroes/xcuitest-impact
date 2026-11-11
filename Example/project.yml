@@ -1,0 +1,40 @@
+name: Example
+options:
+  bundleIdPrefix: dev.testimpact
+  deploymentTarget:
+    iOS: "17.0"
+targets:
+  Example:
+    type: application
+    platform: iOS
+    sources:
+      - Sources
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        PRODUCT_BUNDLE_IDENTIFIER: dev.testimpact.example
+        SWIFT_VERSION: "5.0"
+  ExampleUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - UITests
+    dependencies:
+      - target: Example
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        # TestImpact.swift: made when the bundle loads, so it sees every test of the run.
+        INFOPLIST_KEY_NSPrincipalClass: TestImpact
+        PRODUCT_BUNDLE_IDENTIFIER: dev.testimpact.example.uitests
+        SWIFT_VERSION: "5.0"
+schemes:
+  Example:
+    build:
+      targets:
+        Example: all
+        ExampleUITests: [test]
+    test:
+      config: Debug
+      targets: [ExampleUITests]
