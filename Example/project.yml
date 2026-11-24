@@ -25,7 +25,6 @@ targets:
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES
-        # TestImpact.swift: made when the bundle loads, so it sees every test of the run.
         INFOPLIST_KEY_NSPrincipalClass: TestImpact
         PRODUCT_BUNDLE_IDENTIFIER: dev.testimpact.example.uitests
         SWIFT_VERSION: "5.0"

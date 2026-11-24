@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""impact: which XCUITest UI tests a change can reach, from the lines of the app that each test ran.
+USAGE = """impact: which XCUITest UI tests a change can reach, from the lines of the app that each test ran.
 
 A run of every UI test on a build with coverage counters writes a test map: for each UI test, the lines of the app
 that it ran (TestImpact.swift names one coverage file per app launch). Later, `plan` compares the work tree with the
@@ -33,18 +33,11 @@ from pathlib import Path
 
 CONFIG_FILE = "test-impact.json"
 DEFAULTS = {
-    # Folders whose Swift files are compiled into the app (the app target, local packages), so the map has their lines.
     "sources": ["App/Sources/"],
-    # The folder of the UI test target.
     "ui_tests": "App/UITests/",
-    # The name of the UI test target, for -only-testing.
     "target": "AppUITests",
-    # Only a change under one of these can reach a UI test. A file here that is not Swift source (the project file,
-    # a resource, Package.swift) selects every test.
     "scope": ["App/"],
-    # Folders under "scope" whose change reaches no UI test (unit tests of a package).
     "ignore": [],
-    # A file outside the UI test folder that one UI test file reads: a change to it counts as a change to that file.
     "read_by": {},
 }
 
@@ -55,7 +48,6 @@ def repo_root():
 
 
 def repo_name(root):
-    """The folder name of the main checkout, so every git worktree of a repository uses the same maps."""
     common = subprocess.run(["git", "-C", str(root), "rev-parse", "--path-format=absolute", "--git-common-dir"],
                             capture_output=True, text=True).stdout.strip()
     return Path(common).parent.name if common.endswith("/.git") else Path(root).name
@@ -63,17 +55,14 @@ def repo_name(root):
 
 ROOT = repo_root()
 MAPS = Path(os.environ.get("TEST_IMPACT_MAPS") or Path.home() / ".cache" / "test-impact" / repo_name(ROOT))
-MAPS_KEEP = 4          # maps on disk; `choose` reads the newest MAPS_TRIED of them
+MAPS_KEEP = 4
 MAPS_TRIED = 3
 FORMAT = 1
-# UI test files that every test runs with, whatever names it uses: TestImpact is the principal class of the bundle.
 EVERY_TEST_HELPERS = ("TestImpact.swift",)
 SOURCES, UITESTS, TARGET, SCOPE, NO_TEST_PREFIXES, READ_BY = (), "", "", (), (), {}
 
 
 def configure(config=None):
-    """Sets the description of the project: DEFAULTS, with the keys of `config` in their place. A folder gets its
-    closing slash, so "App" does not also match "AppClip/"."""
     global SOURCES, UITESTS, TARGET, SCOPE, NO_TEST_PREFIXES, READ_BY
     unknown = set(config or {}) - set(DEFAULTS)
     if unknown:
@@ -98,15 +87,10 @@ HUNK = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 DIFF_HEADER = re.compile(r"^diff --git a/(.*) b/(.*)$")
 NOT_CODE = re.compile(r"^\s*(//.*)?$")
 CLASS_WITH_PARENT = re.compile(r"\bclass\s+(\w+)\s*(?:<[^>{]*>)?\s*:\s*([\w.]+)")
-TEST_FUNC = re.compile(r"\bfunc\s+(test\w+)\s*\(\s*\)")   # a test takes no argument (testCaseWillStart(_:) is none)
+TEST_FUNC = re.compile(r"\bfunc\s+(test\w+)\s*\(\s*\)")
 
-
-# ---- the changes of a tree against a commit
 
 def parse_diff(text):
-    """{path: {"kind": "added" | "deleted" | "modified", "hunks": [hunk]}} of `git diff --no-renames -U0`. A hunk is
-    {"old": first old line, "count": old lines, "removed": [text], "added": [text]}; with count 0 the lines were put
-    in after line "old". A binary file has no hunks."""
     changes, current, hunk = {}, None, None
     for line in text.splitlines():
         header = DIFF_HEADER.match(line)
@@ -133,8 +117,6 @@ def parse_diff(text):
 
 
 def tree_changes(commit, root=ROOT):
-    """parse_diff of the work tree of `root` against `commit`, with the files git does not track yet as added. None
-    when git cannot compare them (the commit is not in this repository)."""
     def git(*args):
         return subprocess.run(["git", "-C", str(root), "-c", "core.quotePath=false", *args], capture_output=True,
                               text=True, errors="replace")
@@ -148,10 +130,6 @@ def tree_changes(commit, root=ROOT):
     return changes
 
 
-# ---- the tests of the UI test folder
-
-# A declaration that starts at the left margin (not a comment), after any attributes and modifiers on its line
-# ("@available(iOS 17.0, *) func waitForSheet()", "@MainActor final class SellE2ECase").
 TOP_LEVEL_NAME = re.compile(r"^(?![ \t/])(?!.*\b(?:private|fileprivate)\b).*?\b(?:class|struct|enum|protocol|actor|"
                             r"typealias|func|let|var)\s+(\w+)", re.M)
 EXTENSION = re.compile(r"^(?![ \t/])[^\n{]*?\bextension\s+[\w.]+[^{\n]*\{", re.M)
@@ -160,13 +138,10 @@ WORD = re.compile(r"\w+")
 
 
 def exported_names(text):
-    """The names of a Swift file that another file of the same target can use: what it declares at the left margin
-    (types, functions, constants) and the members of its extensions, without the private ones. A member of a class
-    is not among them: another file reaches it only through the name of the class or of a subclass."""
     names = {m.group(1) for m in TOP_LEVEL_NAME.finditer(text)}
     for m in EXTENSION.finditer(text):
         depth, start, members = 1, m.end(), []
-        for end in range(m.end(), len(text)):   # the text of the extension that is not inside a body of its own
+        for end in range(m.end(), len(text)):
             step = {"{": 1, "}": -1}.get(text[end], 0)
             if step == 1 and depth == 1:
                 members.append(text[start:end])
@@ -181,9 +156,6 @@ def exported_names(text):
 
 
 def users(files):
-    """{file: the files that use one of its exported names, or use a file that does} for test_files entries. A
-    file uses a name when the name is a word of its text; that also counts a word that only looks the same, so it
-    errs to more files."""
     direct = {name: {other for other, entry in files.items()
                      if other != name and files[name]["names"] & entry["words"]} for name in files}
     for name in files:
@@ -196,9 +168,6 @@ def users(files):
 
 
 def test_files(uitests_dir, strip=lambda text: text):
-    """{file name: {"classes": [classes declared], "tests": {class: [tests]}, "names": exported_names, "words": the
-    words of its text}} and {class: parent} for the Swift files of the UI test folder. A test belongs to the last
-    class declared above it in its file."""
     files, parents = {}, {}
     for path in sorted(Path(uitests_dir).rglob("*.swift")):
         text = strip(path.read_text())
@@ -215,7 +184,6 @@ def test_files(uitests_dir, strip=lambda text: text):
 
 
 def with_subclasses(classes, parents):
-    """`classes` and every class that has one of them as an ancestor."""
     found = set(classes)
     grew = True
     while grew:
@@ -226,8 +194,6 @@ def with_subclasses(classes, parents):
                 grew = True
     return found
 
-
-# ---- the selection
 
 def in_ranges(ranges, line):
     return any(a <= line <= b for a, b in ranges)
@@ -242,57 +208,44 @@ def is_code(line):
 
 
 def hidden(path):
-    """A path with a part that starts with a dot (.swiftpm, .build, .DS_Store): tool output, never a source."""
     return any(part.startswith(".") for part in path.split("/"))
 
 
 def relevant(path):
-    """True for a file whose change can reach a UI test: a file under a "scope" folder or one of "read_by", and not
-    a document, tool output or a file under an "ignore" folder."""
     if path.endswith(".md") or hidden(path) or path.startswith(NO_TEST_PREFIXES):
         return False
     return path in READ_BY or path.startswith(SCOPE)
 
 
 def uncommitted(root=ROOT):
-    """The relevant files of the tree that differ from its HEAD commit, or None when git cannot tell. A test map is
-    of a commit, so only a run on a tree with none of these can write one."""
     changes = tree_changes("HEAD", root)
     return None if changes is None else sorted(filter(relevant, changes))
 
 
 def file_selection(path, change, test_map):
-    """What a change to one Swift source of the app selects: (tests, reason), or ("all", reason) when the map cannot
-    place the change. `tests` are "Class/test" names."""
     lines = test_map["lines"].get(path)
     ran = {t: files[path] for t, files in test_map["tests"].items() if path in files}
     if change["kind"] == "added":
-        return set(), None   # no test ran it; the lines that call it are changes of their own
+        return set(), None
     if lines is None:
-        # The file was in the build of the map and has no line that can run: declarations only (stored properties,
-        # cases, a protocol). No test can be tied to it by a line, and its change can still change what runs.
         return "all", f"{path} has no line in the test map"
     if change["kind"] == "deleted" or not change["hunks"]:
         return set(ran), f"{path} is gone or changed as a whole: every test that ran it"
     picked, whole_file = set(), False
     for hunk in change["hunks"]:
         if not any(map(is_code, hunk["removed"] + hunk["added"])):
-            continue   # blank lines and // comments
+            continue
         if hunk["count"]:
             first, last = hunk["old"], hunk["old"] + hunk["count"] - 1
             code = [first + n for n, text in enumerate(hunk["removed"]) if is_code(text)]
-            # A changed line of code that cannot run is a declaration: which tests it reaches is not in the lines.
             placed = all(in_ranges(lines, line) for line in code)
         else:
-            first, last = hunk["old"] + 1, hunk["old"]   # nothing removed: the lines went in between old and old + 1
-            # Inside a body both sides can run. With one side that cannot, the new lines can be a declaration (a
-            # stored property with a default that does something, a method that takes the place of a default
-            # one): every test that makes the type runs it, not only the tests of the lines next to it.
+            first, last = hunk["old"] + 1, hunk["old"]
             placed = in_ranges(lines, hunk["old"]) and in_ranges(lines, hunk["old"] + 1)
         if not placed:
             whole_file = True
             break
-        around = range(first - 1, last + 2)   # the changed lines and the line on each side
+        around = range(first - 1, last + 2)
         picked |= {t for t, covered in ran.items() if any_in_ranges(covered, around)}
     if whole_file:
         return set(ran), f"{path}: a changed line is a declaration, so every test that ran a line of the file"
@@ -300,19 +253,6 @@ def file_selection(path, change, test_map):
 
 
 def select(changes, test_map, class_tests, files, parents):
-    """The UI tests a change selects: {"all": why or None, "tests": {"Class/test": [reasons]}}.
-
-    class_tests is {class: [tests]} of the tree now; files and parents are test_files of the tree now.
-
-    - A test the map does not have (new, or it gave no coverage when the map was made) is always selected.
-    - A Swift file under "sources": file_selection.
-    - A UI test file: its own tests, the tests of the subclasses of its classes, and the tests of every file that
-      uses one of its exported names (`users`). A helper that few files use selects few tests; the file with the
-      base class of most tests selects most. EVERY_TEST_HELPERS select every test.
-    - A file of "read_by": as a change to the UI test file that reads it.
-    - Any other file under "scope" that is not a document (the project file, a resource, Package.swift): every test.
-    - Anything else (another program of the repository, a document, a build script): no UI test.
-    """
     every = sorted(f"{c}/{t}" for c, ts in class_tests.items() for t in ts)
     reasons = {}
 
@@ -334,7 +274,7 @@ def select(changes, test_map, class_tests, files, parents):
                 return {"all": f"{path} changed: every test runs with it", "tests": {t: [path] for t in every}}
             if entry is None:
                 if change["kind"] == "deleted":
-                    continue   # its tests are gone with it; a helper that is gone no longer compiles into the others
+                    continue
                 return {"all": f"{path} is not a file of the UI tests", "tests": {t: [path] for t in every}}
             using = users(files)[name]
             classes = with_subclasses(entry["classes"], parents) | {c for f in using for c in files[f]["tests"]}
@@ -352,14 +292,11 @@ def select(changes, test_map, class_tests, files, parents):
     return {"all": None, "tests": dict(sorted(reasons.items()))}
 
 
-# ---- the maps on disk
-
 def map_path(commit, folder=MAPS):
     return Path(folder) / f"{commit}.json.gz"
 
 
 def save_map(test_map, folder=MAPS):
-    """Writes the map of its commit and removes all but the newest MAPS_KEEP."""
     folder = Path(folder)
     folder.mkdir(parents=True, exist_ok=True)
     path = map_path(test_map["commit"], folder)
@@ -384,17 +321,11 @@ def load_map(path):
 
 
 def maps(folder=MAPS):
-    """The maps on disk, newest first."""
     paths = sorted(Path(folder).glob("*.json.gz"), key=lambda p: p.stat().st_mtime, reverse=True)
     return [m for m in map(load_map, paths) if m]
 
 
 def choose(class_tests, files, parents, root=ROOT, folder=MAPS):
-    """(selection, map) of the map nearest to this tree among the newest maps that git can compare with it, or
-    (None, why) when there is none. Nearest is the fewest changed lines in the files that count (`relevant`), then
-    the newest. It is not the map that selects the fewest tests: that would choose by the answer, and a test that
-    one map ties to a line and another does not would then never run. A selection is the result of `select` with
-    "commit", the commit of its map, and "changed", the files that count."""
     best, distance = None, None
     for test_map in maps(folder)[:MAPS_TRIED]:
         changes = tree_changes(test_map["commit"], root)
@@ -412,12 +343,7 @@ def choose(class_tests, files, parents, root=ROOT, folder=MAPS):
     return best
 
 
-# ---- making a map from the coverage files of a run
-
 def lcov_lines(text, root):
-    """{path under root: {line: count}} of `llvm-cov export -format=lcov`. A file outside root is left out. Both
-    sides are compared without symbolic links: the compiler has the path the build was started with (/tmp/x), git
-    gives the real one (/private/tmp/x)."""
     prefix = os.path.realpath(root).rstrip("/") + "/"
     files, current = {}, None
     for line in text.splitlines():
@@ -434,7 +360,6 @@ def lcov_lines(text, root):
 
 
 def to_ranges(lines):
-    """Sorted line numbers as [[first, last], ...]."""
     ranges = []
     for line in sorted(lines):
         if ranges and line == ranges[-1][1] + 1:
@@ -445,8 +370,6 @@ def to_ranges(lines):
 
 
 def profile_tests(folders):
-    """{"Class/test": [its coverage files]} of the files TestImpact.swift names "<Class>.<test>.<pid>.profraw", in
-    every folder of `folders` (one per machine, when the tests ran on more than one)."""
     tests = {}
     for folder in folders:
         for path in sorted(Path(folder).glob("*.profraw")):
@@ -457,8 +380,6 @@ def profile_tests(folders):
 
 
 def coverage_objects(app):
-    """The binaries of the built app that can hold coverage: its executable, and every dylib and framework in it (a
-    debug build keeps the code in <App>.debug.dylib)."""
     app = Path(app)
     found = [app / app.stem] + sorted(app.glob("*.dylib"))
     found += sorted(p / p.stem for p in (app / "Frameworks").glob("*.framework"))
@@ -466,7 +387,6 @@ def coverage_objects(app):
 
 
 def test_coverage(files, objects, root, work):
-    """({path: {line: count}}, error) of one test: its coverage files merged, then exported per line."""
     profdata = Path(work) / (files[0].name.rsplit(".", 2)[0] + ".profdata")
     merge = subprocess.run(["xcrun", "llvm-profdata", "merge", "-sparse", *map(str, files), "-o", str(profdata)],
                            capture_output=True, text=True)
@@ -482,12 +402,6 @@ def test_coverage(files, objects, root, work):
 
 
 def build_map(profiles, app, commit, passed, root=ROOT, jobs=4):
-    """The test map of a run: profiles are the folders of its coverage files, app the built .app, passed the
-    "Class/test" names that passed. Only a test that passed gets lines: a failed test stopped early, so its lines
-    are not all the lines it reaches, and it stays out of the map, which selects it every time.
-
-    {"format", "commit", "when", "lines": {path: ranges of the lines that can run},
-     "tests": {"Class/test": {path: ranges of the lines it ran}}, "problems": {"Class/test": why it has no lines}}"""
     objects = coverage_objects(app)
     by_test = {t: fs for t, fs in profile_tests(profiles).items() if t in passed}
     lines, tests, problems = {}, {}, {}
@@ -517,11 +431,7 @@ def build_map(profiles, app, commit, passed, root=ROOT, jobs=4):
             "problems": dict(sorted(problems.items()))}
 
 
-# ---- the command line
-
 def passed_tests(xcresult):
-    """The "Class/test" names that passed in an .xcresult, or None when xcresulttool cannot read it. A test that
-    passed on a retry counts: its last run reached all its lines."""
     p = subprocess.run(["xcrun", "xcresulttool", "get", "test-results", "tests", "--path", str(xcresult)],
                        capture_output=True, text=True)
     try:
@@ -532,8 +442,6 @@ def passed_tests(xcresult):
 
 
 def passed_names(results):
-    """The "Class/test" names with result Passed in the JSON of `xcresulttool get test-results tests`. The class of
-    a test is the Test Suite node above it."""
     passed = set()
 
     def walk(node, suite):
@@ -549,7 +457,6 @@ def passed_names(results):
 
 
 def record(args):
-    """Writes the map of the HEAD commit from the coverage files of a run of every UI test."""
     dirty = uncommitted()
     head = subprocess.run(["git", "-C", str(ROOT), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
     if dirty is None or not head:
@@ -575,8 +482,6 @@ def record(args):
 
 
 def tree_tests(root=ROOT):
-    """({class: [tests]}, files, parents) of the UI test folder now. A folder with no test is an error of the
-    config, not a tree with nothing to run: a selection of zero tests would then look like "no test is needed"."""
     files, parents = test_files(Path(root) / UITESTS)
     class_tests = {}
     for entry in files.values():
@@ -588,7 +493,7 @@ def tree_tests(root=ROOT):
 
 
 def main(argv):
-    parser = argparse.ArgumentParser(prog="impact.py", description=__doc__.split("\n\n")[0])
+    parser = argparse.ArgumentParser(prog="impact.py", description=USAGE.split("\n\n")[0])
     commands = parser.add_subparsers(dest="command", required=True)
     plan = commands.add_parser("plan", help="the tests the changes of this tree select")
     plan.add_argument("--args", action="store_true", help="print -only-testing arguments, one per line")
@@ -601,7 +506,7 @@ def main(argv):
     try:
         load_config()
         return run(args)
-    except ValueError as error:   # the config: not JSON, an unknown key, a UI test folder with no test
+    except ValueError as error:
         print(f"impact: {error}", file=sys.stderr)
         return 2
 
