@@ -1,6 +1,3 @@
-"""Tests for impact.py (offline, no simulator): the diff of a tree, the rules that select UI tests from a test map,
-and the map files. Run: python3 tests/test_impact.py
-"""
 import importlib.util
 import subprocess
 import sys
@@ -18,7 +15,6 @@ impact.configure({"sources": ["App/Sources", "Kit/Sources/"], "ui_tests": "App/U
 
 VIEW = "App/Sources/Screens/SellView.swift"
 MODEL = "Kit/Sources/Domain/Money.swift"
-# SellView: lines 10 to 30 can run; "sell" ran 10 to 20, "both" ran 10 to 30. Money: "both" and "money" ran it.
 MAP = {"format": 1, "commit": "c0ffee", "when": "2026-11-10T12:00:00+0100",
        "lines": {VIEW: [[10, 30]], MODEL: [[5, 9]]},
        "tests": {"SellTests/testSell": {VIEW: [[10, 20]]},
@@ -26,7 +22,6 @@ MAP = {"format": 1, "commit": "c0ffee", "when": "2026-11-10T12:00:00+0100",
                  "MoneyTests/testMoney": {MODEL: [[5, 6]]}},
        "problems": {}}
 CLASS_TESTS = {"SellTests": ["testSell", "testBoth"], "MoneyTests": ["testMoney"]}
-# SellTests uses the base class of E2E.swift; MoneyTests uses no helper; SharingTests uses the stand-in server.
 FILES = {"SellTests.swift": {"classes": ["SellTests"], "tests": {"SellTests": ["testSell", "testBoth"]},
                              "names": {"SellTests"}, "words": {"SellTests", "E2ETestCase", "launch"}},
          "MoneyTests.swift": {"classes": ["MoneyTests"], "tests": {"MoneyTests": ["testMoney"]},
@@ -104,7 +99,6 @@ class Selection(unittest.TestCase):
                          (None, {"SellTests/testSell", "SellTests/testBoth"}))
 
     def test_the_line_on_each_side_of_a_change_counts(self):
-        # Line 21 did not run in testSell, line 20 did: a change of 21 can change what follows line 20.
         self.assertEqual(picked({VIEW: modified(21, 1, ["    a()"], ["    b()"])}),
                          (None, {"SellTests/testSell", "SellTests/testBoth"}))
         self.assertEqual(picked({VIEW: modified(22, 1, ["    a()"], ["    b()"])}), (None, {"SellTests/testBoth"}))
@@ -115,8 +109,6 @@ class Selection(unittest.TestCase):
         self.assertEqual(picked({VIEW: modified(24, 0, [], ["    extra()"])}), (None, {"SellTests/testBoth"}))
 
     def test_lines_put_in_at_the_edge_of_a_body_select_every_test_that_ran_the_file(self):
-        # After line 30 (the last line that can run) the new lines are outside a body: a new property or method.
-        # testSell did not run line 30, and it makes the type, so it runs a default value that does something.
         self.assertEqual(picked({VIEW: modified(30, 0, [], ["    var log = Analytics.shared.start()"])}),
                          (None, {"SellTests/testSell", "SellTests/testBoth"}))
         self.assertEqual(picked({VIEW: modified(9, 0, [], ["    func body() {}"])}),
@@ -127,10 +119,8 @@ class Selection(unittest.TestCase):
                          (None, set()))
 
     def test_a_changed_declaration_selects_every_test_that_ran_the_file(self):
-        # Line 3 cannot run (a stored property, an import): the lines cannot say which tests it reaches.
         self.assertEqual(picked({VIEW: modified(3, 1, ["    var limit: Int"], ["    var limit: Double"])}),
                          (None, {"SellTests/testSell", "SellTests/testBoth"}))
-        # Lines put in where neither side can run are a new declaration.
         self.assertEqual(picked({MODEL: modified(40, 0, [], ["    var note = \"\""])}),
                          (None, {"SellTests/testBoth", "MoneyTests/testMoney"}))
 
@@ -155,7 +145,6 @@ class Selection(unittest.TestCase):
     def test_a_ui_test_file_selects_its_tests_and_a_helper_the_tests_of_the_files_that_use_it(self):
         self.assertEqual(picked({"App/UITests/MoneyTests.swift": modified(9, 1, ["a"], ["b"])}),
                          (None, {"MoneyTests/testMoney"}))
-        # MoneyTests.swift has no word that E2E.swift exports, so a change to E2E.swift cannot reach its test.
         self.assertEqual(picked({"App/UITests/E2E.swift": modified(9, 1, ["a"], ["b"])}),
                          (None, {"SellTests/testSell", "SellTests/testBoth"}))
         self.assertEqual(picked({"App/UITests/StandInServer.swift": modified(9, 1, ["a"], ["b"])}), (None, set()))
@@ -163,7 +152,7 @@ class Selection(unittest.TestCase):
     def test_a_helper_reaches_the_tests_of_a_file_through_another_helper(self):
         files = dict(FILES, **{
             "Waits.swift": {"classes": [], "tests": {}, "names": {"poll"}, "words": {"poll"}},
-            "E2E.swift": dict(FILES["E2E.swift"], words={"E2ETestCase", "poll"})})   # the base class waits with poll
+            "E2E.swift": dict(FILES["E2E.swift"], words={"E2ETestCase", "poll"})})
         selection = impact.select({"App/UITests/Waits.swift": modified(9, 1, ["a"], ["b"])}, MAP, CLASS_TESTS,
                                   files, PARENTS)
         self.assertEqual(set(selection["tests"]), {"SellTests/testSell", "SellTests/testBoth"})
@@ -192,7 +181,6 @@ class Selection(unittest.TestCase):
                 "extension XCUIElement {\n    func appears(within timeout: TimeInterval) -> Bool {\n        let start = Date()\n"
                 "        return true\n    }\n    var isShown: Bool { exists }\n    private func own() {}\n}\n"
                 "final class SellTests: SellE2ECase {\n    func testSell() {}\n}\n")
-        # Not: a member of a class (openCard, testSell), a local (deadline, panel, start), anything private.
         self.assertEqual(impact.exported_names(text), {"settle", "poll", "SellE2ECase", "appears", "isShown", "SellTests"})
 
     def test_a_name_behind_an_attribute_can_be_used_by_another_file_too(self):
@@ -211,7 +199,7 @@ class Selection(unittest.TestCase):
         self.assertEqual(using["Helpers.swift"], {"CounterTests.swift", "GreetingTests.swift"})
         self.assertEqual(using["CounterTests.swift"], set())
         self.assertEqual(files["GreetingTests.swift"]["tests"], {"GreetingTests": ["testGreetingShowsTheName"]})
-        self.assertEqual(files["TestImpact.swift"]["tests"], {})   # testCaseWillStart(_:) is no test
+        self.assertEqual(files["TestImpact.swift"]["tests"], {})
         self.assertEqual(parents["CounterTests"], "ExampleTestCase")
 
     def test_a_ui_test_file_with_a_base_class_selects_the_tests_of_its_subclasses(self):
@@ -221,7 +209,6 @@ class Selection(unittest.TestCase):
         class_tests = dict(CLASS_TESTS, SellBase=["testShared"])
         selection = impact.select({"App/UITests/Base.swift": modified(9, 1, ["a"], ["b"])}, MAP, class_tests,
                                   files, parents)
-        # testShared is not in the map (a new test), so it is selected for that reason too.
         self.assertEqual(set(selection["tests"]), {"SellBase/testShared", "SellTests/testSell", "SellTests/testBoth"})
 
     def test_a_deleted_ui_test_file_selects_nothing(self):
@@ -245,7 +232,6 @@ class Selection(unittest.TestCase):
                                  "impact.py": modified(1, 1, ["a"], ["b"])}), (None, set()))
 
     def test_a_folder_of_the_config_does_not_match_a_longer_name(self):
-        # "App/Sources" in the config is the folder App/Sources/, not also App/SourcesOld/.
         every, _ = picked({"App/SourcesOld/A.swift": modified(1, 1, ["a"], ["b"])})
         self.assertIn("not Swift source", every)
 
@@ -334,11 +320,10 @@ class Maps(unittest.TestCase):
             git("add", ".")
             git("commit", "-qm", "c")
             commits.append(git("rev-parse", "HEAD"))
-        # The far map (30 changed lines from the tree) would select nothing: no test in it ran the file.
         far = dict(MAP, commit=commits[0], tests={"SellTests/testSell": {MODEL: [[5, 6]]},
                                                   "SellTests/testBoth": {MODEL: [[5, 6]]}, "MoneyTests/testMoney": {MODEL: [[5, 6]]}})
         near = dict(MAP, commit=commits[1])
-        for test_map, minute in ((near, 1), (far, 2)):   # the far map is the newer file
+        for test_map, minute in ((near, 1), (far, 2)):
             subprocess.run(["touch", "-t", f"20261110120{minute}", str(impact.save_map(test_map, folder))], check=True)
         source.write_text(source.read_text().replace("LINE 25\n", "LINE twenty-five\n"))
         selection, used = impact.choose(CLASS_TESTS, FILES, PARENTS, root=root, folder=folder)
